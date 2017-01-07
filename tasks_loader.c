@@ -51,8 +51,11 @@ struct load_params {
 
 	char filepath[512];
 	char desc[32];
-	void (*cb)(const void* data, size_t size, void* ud);
-	void* ud;
+
+	void (*load_cb)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
+
+	void (*parser_cb)(const void* data, size_t size, void* ud);
+	void* parser_ud;
 };
 
 struct load_params_queue {
@@ -94,8 +97,6 @@ struct tasks_loader {
 
 	struct load_params_queue  params_load_queue;
 	struct parse_params_queue params_parse_queue;
-
-	void (*load_cb)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
 };
 
 static inline int
@@ -137,8 +138,8 @@ _unpack_memory_to_job(const void* data, size_t size, void* ud) {
 	params->size = size;
 	params->data = buf;
 
-	params->cb = prev_params->cb;
-	params->ud = prev_params->ud;
+	params->cb = prev_params->parser_cb;
+	params->ud = prev_params->parser_ud;
 
 	struct job* job = NULL;
 	TASKS_QUEUE_POP(prev_params->loader->job_free_queue, job);
@@ -201,7 +202,7 @@ _load_file(void* arg) {
 		struct load_params* params = (struct load_params*)job->ud;
 		if (_is_valid_version(loader, params->version)) {
 			memcpy(params->desc, job->desc, sizeof(job->desc));
-			loader->load_cb(params->filepath, &_unpack_memory_to_job, params);
+			params->load_cb(params->filepath, &_unpack_memory_to_job, params);
 		}
 
 		TASKS_QUEUE_PUSH(loader->params_load_queue, params);
@@ -211,10 +212,8 @@ _load_file(void* arg) {
 }
 
 struct tasks_loader*
-tasks_loader_create(void (*load)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud), int thread_num) {
+tasks_loader_create(int thread_num) {
 	struct tasks_loader* loader = (struct tasks_loader*)malloc(sizeof(*loader));
-
-	loader->load_cb = load;
 
 	TASKS_QUEUE_INIT(loader->job_free_queue);
 	TASKS_QUEUE_INIT(loader->job_load_queue);
@@ -297,7 +296,7 @@ tasks_loader_clear(struct tasks_loader* loader) {
 }
 
 void 
-tasks_load_file(struct tasks_loader* loader, const char* filepath, void (*parser)(const void* data, size_t size, void* ud), void* ud, const char* desc) {
+tasks_load_file(struct tasks_loader* loader, const char* filepath, struct tasks_load_cb* cb, const char* desc) {
 	struct load_params* params = NULL;
 	TASKS_QUEUE_POP(loader->params_load_queue, params);
 	if (!params) {
@@ -311,8 +310,10 @@ tasks_load_file(struct tasks_loader* loader, const char* filepath, void (*parser
 	strcpy(params->filepath, filepath);
 	params->filepath[strlen(filepath)] = 0;
 
-	params->cb = parser;
-	params->ud = ud;
+	params->load_cb = cb->load;
+
+	params->parser_cb = cb->parser;
+	params->parser_ud = cb->parser_ud;
 
 	struct job* job = NULL;
 	TASKS_QUEUE_POP(loader->job_free_queue, job);
