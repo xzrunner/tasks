@@ -7,6 +7,7 @@ extern "C"
 #define tasks_loader_h
 
 #include <stdbool.h>
+#include <stddef.h>
 
 struct tasks_loader;
 
