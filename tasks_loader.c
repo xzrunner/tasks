@@ -55,6 +55,7 @@ struct load_params {
 	void (*load_cb)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
 
 	void (*parser_cb)(const void* data, size_t size, void* ud);
+	void (*release_cb)(void* ud);
 	void* parser_ud;
 };
 
@@ -71,7 +72,9 @@ struct parse_params {
 
 	char* data;
 	size_t size;
-	void (*cb)(const void* data, size_t size, void* ud);
+
+	void (*parser_cb)(const void* data, size_t size, void* ud);
+	void (*release_cb)(void* ud);
 	void* ud;
 };
 
@@ -138,8 +141,9 @@ _unpack_memory_to_job(const void* data, size_t size, void* ud) {
 	params->size = size;
 	params->data = buf;
 
-	params->cb = prev_params->parser_cb;
-	params->ud = prev_params->parser_ud;
+	params->parser_cb         = prev_params->parser_cb;
+	params->release_cb = prev_params->release_cb;
+	params->ud         = prev_params->parser_ud;
 
 	struct job* job = NULL;
 	TASKS_QUEUE_POP(prev_params->loader->job_free_queue, job);
@@ -149,6 +153,7 @@ _unpack_memory_to_job(const void* data, size_t size, void* ud) {
 	job->type = JOB_PARSER_DATA;
 	job->ud = params;
 	memcpy(job->desc, prev_params->desc, sizeof(prev_params->desc));
+
 	TASKS_QUEUE_PUSH(prev_params->loader->job_parse_queue, job);
 
 	//logger_printf("async_load push 3, job: %p", job);
@@ -276,6 +281,11 @@ tasks_loader_clear(struct tasks_loader* loader) {
 		TASKS_QUEUE_POP(loader->job_load_queue, job);
 		if (job) {
 			//logger_printf("async_load clear pop job_load_queue, job: %p", job);
+			struct load_params* params = (struct load_params*)job->ud;
+			if (params->release_cb) {
+				params->release_cb(params->parser_ud);
+			}
+
 			TASKS_QUEUE_PUSH(loader->job_free_queue, job);
 		}
 	} while (job);
@@ -285,6 +295,10 @@ tasks_loader_clear(struct tasks_loader* loader) {
 		if (job) {
 			//logger_printf("async_load clear pop job_parse_queue, job: %p", job);
 			struct parse_params* params = (struct parse_params*)job->ud;
+			if (params->release_cb) {
+				params->release_cb(params->ud);
+			}
+
 			free(params->data), params->data = NULL;
 			params->size = 0;
 			TASKS_QUEUE_PUSH(loader->params_parse_queue, params);
@@ -296,7 +310,8 @@ tasks_loader_clear(struct tasks_loader* loader) {
 }
 
 void 
-tasks_load_file(struct tasks_loader* loader, const char* filepath, struct tasks_load_cb* cb, const char* desc) {
+tasks_load_file(struct tasks_loader* loader, const char* filepath, 
+                struct tasks_load_cb* cb, const char* desc) {
 	struct load_params* params = NULL;
 	TASKS_QUEUE_POP(loader->params_load_queue, params);
 	if (!params) {
@@ -312,8 +327,9 @@ tasks_load_file(struct tasks_loader* loader, const char* filepath, struct tasks_
 
 	params->load_cb = cb->load;
 
-	params->parser_cb = cb->parser;
-	params->parser_ud = cb->parser_ud;
+	params->parser_cb  = cb->parser;
+	params->release_cb = cb->release;
+	params->parser_ud  = cb->parser_ud;
 
 	struct job* job = NULL;
 	TASKS_QUEUE_POP(loader->job_free_queue, job);
@@ -322,9 +338,10 @@ tasks_load_file(struct tasks_loader* loader, const char* filepath, struct tasks_
 	}
 
 	job->type = JOB_LOAD_FILE;
-	job->ud = params;
+	job->ud = params;	
 	strcpy(job->desc, desc);
 	job->desc[strlen(job->desc)] = 0;
+
 	TASKS_QUEUE_PUSH(loader->job_load_queue, job);
 
 	trigger_dirty_event(loader);
@@ -345,8 +362,12 @@ tasks_loader_update(struct tasks_loader* loader) {
 	//logger_printf("async_load pop 4, job: %p", job);
 
 	struct parse_params* params = (struct parse_params*)job->ud;
-	if (_is_valid_version(loader, params->version) && params->cb) {
-		params->cb(params->data, params->size, params->ud);
+
+	if (_is_valid_version(loader, params->version) && params->parser_cb) {
+		params->parser_cb(params->data, params->size, params->ud);
+	}
+	if (_is_valid_version(loader, params->version) && params->release_cb) {
+		params->release_cb(params->ud);
 	}
 
 	free(params->data), params->data = NULL;

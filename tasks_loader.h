@@ -14,6 +14,7 @@ struct tasks_loader;
 struct tasks_load_cb {
 	void (*load)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
 	void (*parser)(const void* data, size_t size, void* ud);
+	void (*release)(void *ud);
 	void* parser_ud;
 };
 
