@@ -24,7 +24,9 @@ struct job {
 	int type;
 	void* ud;
 
+#ifdef TASKS_DEBUG
 	char desc[32];
+#endif // TASKS_DEBUG
 };
 
 struct job_queue {
@@ -48,10 +50,12 @@ struct load_params {
 
 	struct tasks_loader* loader;
 
-	char filepath[512];
+	char res_path[TASKS_RES_PATH_SIZE];
+#ifdef TASKS_DEBUG
 	char desc[32];
+#endif // TASKS_DEBUG
 
-	void (*load_cb)(const char* filepath, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
+	void (*load_cb)(const void* res_path, void (*unpack)(const void* data, size_t size, void* ud), void* ud);
 
 	void (*parser_cb)(const void* data, size_t size, void* ud);
 	void (*release_cb)(void* ud);
@@ -141,7 +145,7 @@ _unpack_memory_to_job(const void* data, size_t size, void* ud) {
 	params->size = size;
 	params->data = buf;
 
-	params->parser_cb         = prev_params->parser_cb;
+	params->parser_cb  = prev_params->parser_cb;
 	params->release_cb = prev_params->release_cb;
 	params->ud         = prev_params->parser_ud;
 
@@ -152,7 +156,9 @@ _unpack_memory_to_job(const void* data, size_t size, void* ud) {
 	}
 	job->type = JOB_PARSER_DATA;
 	job->ud = params;
+#ifdef TASKS_DEBUG
 	memcpy(job->desc, prev_params->desc, sizeof(prev_params->desc));
+#endif // TASKS_DEBUG
 
 	TASKS_QUEUE_PUSH(prev_params->loader->job_parse_queue, job);
 
@@ -206,8 +212,10 @@ _load_file(void* arg) {
 
 		struct load_params* params = (struct load_params*)job->ud;
 		if (_is_valid_version(loader, params->version)) {
+#ifdef TASKS_DEBUG
 			memcpy(params->desc, job->desc, sizeof(job->desc));
-			params->load_cb(params->filepath, &_unpack_memory_to_job, params);
+#endif // TASKS_DEBUG
+			params->load_cb(params->res_path, &_unpack_memory_to_job, params);
 		}
 
 		TASKS_QUEUE_PUSH(loader->params_load_queue, params);
@@ -311,7 +319,7 @@ tasks_loader_release(struct tasks_loader* loader) {
 //}
 
 void 
-tasks_load_file(struct tasks_loader* loader, const char* filepath, 
+tasks_load_file(struct tasks_loader* loader, const void* res_path, 
                 struct tasks_load_cb* cb, const char* desc) {
 	struct load_params* params = NULL;
 	TASKS_QUEUE_POP(loader->params_load_queue, params);
@@ -323,7 +331,7 @@ tasks_load_file(struct tasks_loader* loader, const char* filepath,
 
 	params->loader = loader;
 
-	strcpy(params->filepath, filepath);
+	memcpy(params->res_path, res_path, TASKS_RES_PATH_SIZE);
 
 	params->load_cb = cb->load;
 
@@ -339,7 +347,9 @@ tasks_load_file(struct tasks_loader* loader, const char* filepath,
 
 	job->type = JOB_LOAD_FILE;
 	job->ud = params;	
+#ifdef TASKS_DEBUG
 	strcpy(job->desc, desc);
+#endif // TASKS_DEBUG
 
 	loader->working_count += 1;
 	TASKS_QUEUE_PUSH(loader->job_load_queue, job);
